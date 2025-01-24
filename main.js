@@ -1,3 +1,5 @@
+const https = require('https');
+
 
 /*
  * BiliSupported 扩展 for SimMusic
@@ -10,33 +12,13 @@
 
 /**************** 基础配置 ****************/
 // 当没有config.setItem时，调用config.getItem会返回defaultConfig中的值
-defaultConfig["folderLists"] = [];
+
+// defaultConfig["folderLists"] = [];
 
 
 /**************** 工具函数 ****************/
 // 这些函数是插件自己需要的函数，个人推荐const一个object然后都用它存放，防止和主程序内置函数名冲突
 const FileExtensionTools = {
-	scanMusic(directory) {
-		try {
-			const supportedExtensions = config.getItem("musicFormats").split(" ");
-			let list = [];
-			fs.readdirSync(directory).forEach(file => {
-				const fullPath = path.join(directory, file);
-				if (fs.statSync(fullPath).isDirectory()) {
-					list = list.concat(this.scanMusic(fullPath));
-				} else {
-					const ext = path.extname(fullPath).toLowerCase();
-					if (supportedExtensions.includes(ext)) {
-						// 请务必以插件定义的“scheme:”开头，不然扫描元数据和获取播放链接的时候不知道问哪个插件调方法
-						// 后面的随意，例如在线歌曲可以使用“xxmusic:114514”，用歌曲id来，你喜欢就好
-						// 一首歌的内部id应该是唯一的（用于播放和元数据索引），不然歌曲索引的时候会重复请求数据，消耗无意义的资源
-						list.push("file:" + fullPath);
-					}
-				}
-			});
-			return list;
-		} catch { return []; }
-	},
 	formatTime(ms) {
 		const totalSeconds = Math.floor(ms / 1000);
 		const minutes = Math.floor(totalSeconds / 60);
@@ -45,10 +27,10 @@ const FileExtensionTools = {
 		const formattedMinutes = minutes.toString().padStart(2, '0');
 		const formattedSeconds = seconds.toString().padStart(2, '0');
 		const formattedMilliseconds = milliseconds.toString();
-	  	return `${formattedMinutes}:${formattedSeconds}.${formattedMilliseconds}`;
+		return `${formattedMinutes}:${formattedSeconds}.${formattedMilliseconds}`;
 	},
 	fileMenuItem: [
-		{type: ["single"], content: { label: "在资源管理器显示", icon: "ED8A", click() {shell.showItemInFolder(getCurrentSelected()[0])} }}
+		{ type: ["single"], content: { label: "在资源管理器显示", icon: "ED8A", click() { shell.showItemInFolder(getCurrentSelected()[0]) } } }
 	]
 }
 
@@ -56,27 +38,27 @@ const FileExtensionTools = {
 
 /**************** 左侧导航 ****************/
 // 如果你懒，这个字段可以不写，这样插件就没有左侧导航功能（你可以参考下面的写搜索功能）
-ExtensionConfig.file.musicList = {
+ExtensionConfig.bilibili.musicList = {
 	// 这个函数用于处理用户点击歌单“加号”的事件
 	// 如果没有（例如你的插件是自动同步一个用户的所有歌单），可以不写，这样加号图标就不会显示
 	add(callback) {
 		// 这里自己实现添加逻辑，简单输入可直接调内置的 prompt(placeholder:str, callback:function) 方法
 		ipcRenderer.invoke("pickFolder")
-		.then(dir => {
-			if (!dir || !dir[0]) return;
-			dir = dir[0].trim().replaceAll("/", "\\");
-			// 内置config读取可用getItem
-			const lists = config.getItem("folderLists");
-			// 由于数据格式由开发者自行定义，重复导入 & 其他错误需要开发者自行处理
-			if (dir.split("\\").length == 2 && !dir.split("\\")[1]) return alert("您不能导入磁盘根目录。");
-			if (lists.includes(dir)) return alert("此目录已被添加到目录列表中。");
-			lists.push(dir);
-			// 内置config写入可用setItem
-			config.setItem("folderLists", lists);
-			// 导入成功后需开发者自行调用callback以更新左侧显示内容（必须），switchList以打开刚才导入的歌单（可选）
-			callback();
-			ExtensionConfig.file.musicList.switchList(dir);
-		});
+			.then(dir => {
+				if (!dir || !dir[0]) return;
+				dir = dir[0].trim().replaceAll("/", "\\");
+				// 内置config读取可用getItem
+				const lists = config.getItem("folderLists");
+				// 由于数据格式由开发者自行定义，重复导入 & 其他错误需要开发者自行处理
+				if (dir.split("\\").length == 2 && !dir.split("\\")[1]) return alert("您不能导入磁盘根目录。");
+				if (lists.includes(dir)) return alert("此目录已被添加到目录列表中。");
+				lists.push(dir);
+				// 内置config写入可用setItem
+				config.setItem("folderLists", lists);
+				// 导入成功后需开发者自行调用callback以更新左侧显示内容（必须），switchList以打开刚才导入的歌单（可选）
+				callback();
+				ExtensionConfig.file.musicList.switchList(dir);
+			});
 	},
 	// 这个函数用于渲染左侧的歌单列表
 	renderList(container) {
@@ -89,26 +71,30 @@ ExtensionConfig.file.musicList = {
 			element.textContent = folderName;
 			element.dataset.folderName = name;
 			// 处理点击，一般直接switchList即可
-			element.onclick = () => {this.switchList(name);};
+			element.onclick = () => { this.switchList(name); };
 			// 创建右键菜单，具体使用方法参考 zhujin917/3sqrt7-context-menu/README.md
 			element.oncontextmenu = event => {
 				new ContextMenu([
-					{ label: "查看歌曲", icon: "ECB5", click() {element.click();} },
-					{ label: "在资源管理器中显示", icon: "ED8A", click() {shell.openPath(name);} },
+					{ label: "查看歌曲", icon: "ECB5", click() { element.click(); } },
+					{ label: "在资源管理器中显示", icon: "ED8A", click() { shell.openPath(name); } },
 					{ type: "separator" },
-					{ label: "添加到歌单", icon: "EE0D", submenu: MusicList.getMenuItems(listName => {
-						MusicList.importToMusicList(listName, FileExtensionTools.scanMusic(name));
-						MusicList.switchList(listName, true);
-					}) },
-					{ label: "从列表中移除", icon: "ED74", click() {
-						confirm(`目录「${folderName}」将从 SimMusic 目录列表中移除，但不会从文件系统中删除。是否继续？`, () => {
-							const lists = config.getItem("folderLists");
-							lists.splice(lists.indexOf(name), 1);
-							config.setItem("folderLists", lists);
-							if (element.classList.contains("active")) switchRightPage("rightPlaceholder");
-							element.remove();
-						});
-					} },
+					{
+						label: "添加到歌单", icon: "EE0D", submenu: MusicList.getMenuItems(listName => {
+							MusicList.importToMusicList(listName, FileExtensionTools.scanMusic(name));
+							MusicList.switchList(listName, true);
+						})
+					},
+					{
+						label: "从列表中移除", icon: "ED74", click() {
+							confirm(`目录「${folderName}」将从 SimMusic 目录列表中移除，但不会从文件系统中删除。是否继续？`, () => {
+								const lists = config.getItem("folderLists");
+								lists.splice(lists.indexOf(name), 1);
+								config.setItem("folderLists", lists);
+								if (element.classList.contains("active")) switchRightPage("rightPlaceholder");
+								element.remove();
+							});
+						}
+					},
 				]).popup([event.clientX, event.clientY]);
 			};
 			// 把div附加到左侧界面，container会由ExtensionRuntime自动传入，无需担心是否存在
@@ -123,8 +109,8 @@ ExtensionConfig.file.musicList = {
 		// rML第三个参数请固定false，第4个参数指定是否进行预先渲染，如果为true则在二次渲染之前不会显示歌单（适用于在线歌曲必须要获取metadata的情况）
 		renderMusicList(FileExtensionTools.scanMusic(name), {
 			uniqueId: "folder-" + name,
-			errorText: "当前目录为空", 
-			menuItems: FileExtensionTools.fileMenuItem, 
+			errorText: "当前目录为空",
+			menuItems: FileExtensionTools.fileMenuItem,
 			musicListInfo: {
 				name: splitted[splitted.length - 1],
 				dirName: name,
@@ -143,98 +129,144 @@ ExtensionConfig.file.musicList = {
 // 这个函数用于读取音乐元数据，不管你是本地还是在线，无所谓你咋获取，最后都调callback(data)就行。
 // 如果是在线的用fetch就更好做，直接修改我musicmetadata的promise就得
 //【注意：读取失败可以返回null，各字段值可以没有】
-ExtensionConfig.file.readMetadata = async (file) => {
-	file = file.replace("file:", "");
-	try {
-		const metadata = await musicMetadata.parseFile(file);
-		let nativeLyrics;
-		for (const tagType in metadata.native) {
-			if (metadata.native[tagType].forEach) metadata.native[tagType].forEach(tag => {
-				if (tag.value && tag.value.match && tag.value.match(/\[\d+\:\d+\.\d+\]/g)) {
-					nativeLyrics = tag.value;
-				}
-				else if (tag.value && tag.value.text && tag.value.text.match && tag.value.text.match(/\[\d+\:\d+\.\d+\]/g)) {
-					nativeLyrics = tag.value.text;
-				}
-			});
-		}
-		const metadataArtist = metadata.common.artists ? metadata.common.artists.join(", ") : null || metadata.common.artist;
-		const metadataCover = metadata.common.picture ? metadata.common.picture[0] ? metadata.common.picture[0].data : null : null;
-		return {
-			title: metadata.common.title,
-			artist: metadataArtist,
-			album: metadata.common.album ? metadata.common.album : file.split("\\")[file.split("\\").length - 2],
-			time: metadata.format.duration,
-			cover: metadataCover ? metadataCover : "",
-			lyrics: nativeLyrics ? nativeLyrics : "",
-		};
-	} catch {
-		return {};
-	}
+
+const basicHeaders = {
+	"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+	"Accept-Encoding": "gzip",
+	"Origin": "https://www.bilibili.com",
+	"Host": "api.bilibili.com",
+	"Referer": "https://www.bilibili.com/"
+};
+
+
+ExtensionConfig.bilibili.readMetadata = async (file) => {
+	const id = file.replace("bilibili:", "");
+	const response = await fetch("https://api.bilibili.com/x/web-interface/view?bvid=" + id);
+	const metadata = await response.json();
+	return {
+		title: metadata.data.title,
+		artist: metadata.data.owner.name,
+		album: metadata.data.tname_v2 ? metadata.data.tname_v2 : "未知专辑",
+		time: metadata.data.duration,
+		cover: metadata.data.pic ? metadata.data.pic : "",
+		lyrics: "",
+	};
 };
 
 
 /**************** 歌曲播放 ****************/
-ExtensionConfig.file.player = {
+ExtensionConfig.bilibili.player = {
 	// 这个函数用于获取播放地址，返回值可以是本地文件地址 / http(s)地址 / blob地址 / base64 dataurl，不成功可以用空参数调callback
 	//【注意：读取失败return可以用空串】
 	async getPlayUrl(file) {
-		return file.replace("file:", "");
+		const id = file.replace("bilibili:", "");
+		let cid;
+		try {
+			cid = await new Promise((resolve, reject) => {
+				https.get(`https://api.bilibili.com/x/player/pagelist?bvid=${id}`, (res) => {
+					let data = '';
+					res.on('data', chunk => data += chunk);
+					res.on('end', () => resolve(JSON.parse(data).data[0].cid));
+				}).on('error', reject);
+			});
+		} catch (error) {
+			console.error("Error fetching CID:", error);
+			return "";
+		}
+
+		let downloadUrl;
+		try {
+			downloadUrl = await new Promise((resolve, reject) => {
+				https.get(`https://api.bilibili.com/x/player/playurl?bvid=${id}&cid=${cid}`, (res) => {
+					let data = '';
+					res.on('data', chunk => data += chunk);
+					res.on('end', () => resolve(JSON.parse(data).data.durl[0].url));
+				}).on('error', reject);
+			});
+		} catch (error) {
+			console.error("Error fetching download URL:", error);
+			return "";
+		}
+
+		const downloadAudio = async (url, start, end) => {
+			return new Promise((resolve, reject) => {
+				const options = {
+					headers: {
+						"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+						"Accept-Encoding": "gzip",
+						"Origin": "https://www.bilibili.com",
+						"Referer": "https://www.bilibili.com/" + id,
+						"Range": `bytes=${start}-${end}`
+					},
+					minVersion: 'TLSv1.2',
+					maxVersion: 'TLSv1.3'
+				};
+				https.get(url, options, (res) => {
+					const chunks = [];
+					res.on('data', chunk => chunks.push(chunk));
+					res.on('end', () => resolve(Buffer.concat(chunks)));
+				}).on('error', reject);
+			});
+		};
+
+		const getAudioSize = async (url) => {
+			return new Promise((resolve, reject) => {
+				const options = {
+					headers: {
+						"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+						"Accept-Encoding": "gzip",
+						"Origin": "https://www.bilibili.com",
+						"Referer": "https://www.bilibili.com/" + id
+					},
+					method: 'HEAD',
+					minVersion: 'TLSv1.2',
+					maxVersion: 'TLSv1.3'
+				};
+				https.get(url, options, (res) => {
+					const size = parseInt(res.headers['content-length'], 10);
+					resolve(size);
+				}).on('error', reject);
+			});
+		};
+
+		let audioBuffer;
+		try {
+			const size = await getAudioSize(downloadUrl);
+			const chunkSize = Math.ceil(size / 4); // Divide into 4 parts for multi-threading
+			const promises = [];
+			for (let i = 0; i < 4; i++) {
+				const start = i * chunkSize;
+				const end = (i + 1) * chunkSize - 1;
+				promises.push(downloadAudio(downloadUrl, start, end));
+			}
+			const chunks = await Promise.all(promises);
+			audioBuffer = Buffer.concat(chunks);
+		} catch (error) {
+			console.error("Error fetching audio buffer:", error);
+			return "";
+		}
+
+		const base64Audio = audioBuffer.toString('base64');
+		return `data:audio/mp3;base64,${base64Audio}`;
 	},
 	// 这个函数用于（在本地索引没有歌词的情况下获取歌词），例如在线播放时把歌词全部写到索引不太现实，就会调用这个方法直接读取
 	//【注意：读取失败return可以用空串】
 	async getLyrics(file) {
-		file = file.replace("file:", "");
-		const lastDotIndex = file.lastIndexOf(".");
-		lrcPath = file.substring(0, lastDotIndex) + ".lrc";
-		if (!fs.existsSync(lrcPath)) return "";
-		try {return fs.readFileSync(lrcPath, "utf8");}
-		catch {
-			let id3Lyrics = "";
-			const id3LyricsArray = await nodeId3.Promise.read(file);
-			if (id3LyricsArray && id3LyricsArray.synchronisedLyrics && id3LyricsArray.synchronisedLyrics[0]) {
-				id3LyricsArray.synchronisedLyrics[0].synchronisedText.forEach(obj => {
-					id3Lyrics += `[${FileExtensionTools.formatTime(obj.timeStamp)}]${obj.text}\n`;
-				});
-			}
-			return id3Lyrics;
-		}
-	},
-	// 这个函数用于在播放器菜单中插入内容
-	getPlayerMenu(file) {
-		return [{
-			label: "在资源管理器显示",
-			icon: "ED8A", 
-			click() {shell.showItemInFolder(file);}
-		}];
+		return "";
 	}
 };
 
 
 /**************** 歌曲搜索 ****************/
-ExtensionConfig.file.search = async (keyword, _page) => {
-	let allFiles = {};
-	config.getItem("folderLists").forEach(folder => {
-		FileExtensionTools.scanMusic(folder).forEach(file => {
-			const musicInfo = lastMusicIndex[file];
-			const musicInfoString = (SimMusicTools.getTitleFromPath(file) + (musicInfo ? (musicInfo.title + musicInfo.album + musicInfo.artist) : "")).toLowerCase();
-			allFiles[file] = musicInfoString;
-		});
-	});
-	const fileArray = Object.keys(allFiles);
-	// 切割搜索词
-	const splitted = SimMusicTools.naturalSplit(keyword, true);
-	// 先把啥都匹配不到的丢垃圾桶里
-	const filteredFiles = fileArray.filter(file => splitted.some(splitItem => allFiles[file].includes(splitItem)));
-	// 然后按照匹配到的数量进行排序
-	const resultArray = filteredFiles.sort((a, b) => {
-		const countA = splitted.filter(keyword => allFiles[a].includes(keyword)).length;
-		const countB = splitted.filter(keyword => allFiles[b].includes(keyword)).length;
-		return countB - countA;
-	});
+ExtensionConfig.bilibili.search = async (keyword, _page) => {
+	let resultArray = [];
+	const response = await fetch("https://api.3r60.top/v2/bili/s/?keydown=" + encodeURI(keyword));
+	const result = await response.json();
+	resultArray = result.data.result[11].data.map(item => "bilibili:" + item.bvid);
+
 	return {
 		files: resultArray,
-		menu: FileExtensionTools.fileMenuItem,//.concat(DownloadController.getMenuItems()),
+		menu: null,
 		hasMore: false
 	};
 }

@@ -1,10 +1,10 @@
 {
-  "packageId": "RisBugFix",
-  "extName": "补丁-链接#符号支持",
-  "uiName": "补丁-链接#符号支持",
+  "packageId": "bilibili",
+  "extName": "[音源扩展]Bilibili",
+  "uiName": "B站",
   "version": "0.0.1",
   "entries": [
-    "function.js"
+    "main.js"
   ]
 }
   
