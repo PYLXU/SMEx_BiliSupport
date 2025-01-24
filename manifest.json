@@ -1,0 +1,10 @@
+{
+  "packageId": "RisBugFix",
+  "extName": "补丁-链接#符号支持",
+  "uiName": "补丁-链接#符号支持",
+  "version": "0.0.1",
+  "entries": [
+    "function.js"
+  ]
+}
+  
