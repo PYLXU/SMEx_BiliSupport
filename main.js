@@ -208,12 +208,10 @@ ExtensionConfig.bilibili.player = {
 		let cid = id.split("-")[1];
 		const cacheFilePath = path.join(tempDir, `${bvid}-${cid}.mp3`);
 
-		// Check if the file is already cached
 		if (fs.existsSync(cacheFilePath)) {
 			return `file://${cacheFilePath}`;
 		}
 
-		// Fetch CID if not provided
 		if (!cid || cid == "default") {
 			try {
 				cid = await new Promise((resolve, reject) => {
@@ -301,10 +299,8 @@ ExtensionConfig.bilibili.player = {
 			return "";
 		}
 
-		// Save the audio buffer to cache
 		fs.writeFileSync(cacheFilePath, audioBuffer);
 
-		// Check and manage cache size
 		const maxTemp = config.getItem("ext.bilibili.maxTemp", 10);
 		const cachedFiles = fs.readdirSync(tempDir);
 		if (cachedFiles.length > maxTemp) {
