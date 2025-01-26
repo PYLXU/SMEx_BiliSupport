@@ -23,6 +23,8 @@ SettingsPage.data.push(
 	{
 		type: "button",
 		text: "清除缓存",
+		description: "清除所有Bilibili音乐的缓存文件",
+		button: "清除",
 		onclick: () => {
 			const tempDir = path.join(os.tmpdir(), 'sim-music.ext.bilibili', 'cache');
 			if (fs.existsSync(tempDir)) {
@@ -32,6 +34,20 @@ SettingsPage.data.push(
 				alert("缓存已清除");
 			} else {
 				alert("没有缓存文件");
+			}
+		}
+	},
+	{
+		type: "button",
+		text: "打开缓存目录",
+		description: "打开Bilibili音乐的缓存文件夹",
+		button: "打开",
+		onclick: () => {
+			const tempDir = path.join(os.tmpdir(), 'sim-music.ext.bilibili', 'cache');
+			if (fs.existsSync(tempDir)) {
+				require('child_process').exec(`start "" "${tempDir}"`);
+			} else {
+				alert("缓存目录不存在");
 			}
 		}
 	}
