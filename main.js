@@ -17,32 +17,25 @@ const os = require('os');
 
 defaultConfig["ext.bilibili.musicList"] = [];
 defaultConfig["ext.bilibili.maxTemp"] = 50;
-
-/**************** 工具函数 ****************/
-// 这些函数是插件自己需要的函数，个人推荐const一个object然后都用它存放，防止和主程序内置函数名冲突
-const FileExtensionTools = {
-	convertToLrc: (jsonData) => {
-		let lrcText = "";
-		jsonData.body.forEach((item) => {
-			const fromTime = item.from;
-			const toTime = item.to;
-			const content = item.content;
-			const fromTimeStr = `[${this.padTime(fromTime)}]`;
-			const toTimeStr = `[${this.padTime(toTime)}]`;
-			lrcText += `${fromTimeStr}${content}\n`;
-			lrcText += `${toTimeStr}${content}\n`;
-		});
-		return lrcText;
-	},
-	padTime: (time) => {
-		const minutes = Math.floor(time / 60).toString().padStart(2, "0");
-		const seconds = (time % 60).toFixed(2).padStart(5, "0");
-		return `${minutes}:${seconds}`;
-	},
-	fileMenuItem: [
-		{ type: ["single"], content: { label: "在资源管理器显示", icon: "ED8A", click() { shell.showItemInFolder(getCurrentSelected()[0]) } } }
-	]
-}
+SettingsPage.data.push(
+	{ type: "title", text: "[音源扩展]Bilibili支持" },
+	{ type: "input", text: "最大缓存文件数", description: "设置缓存文件的最大数量", configItem: "ext.bilibili.maxTemp" },
+	{
+		type: "button",
+		text: "清除缓存",
+		onclick: () => {
+			const tempDir = path.join(os.tmpdir(), 'sim-music.ext.bilibili', 'cache');
+			if (fs.existsSync(tempDir)) {
+				fs.readdirSync(tempDir).forEach(file => {
+					fs.unlinkSync(path.join(tempDir, file));
+				});
+				alert("缓存已清除");
+			} else {
+				alert("没有缓存文件");
+			}
+		}
+	}
+);
 
 /**************** 左侧导航 ****************/
 // 如果你懒，这个字段可以不写，这样插件就没有左侧导航功能（你可以参考下面的写搜索功能）
@@ -199,7 +192,7 @@ ExtensionConfig.bilibili.player = {
 	// 这个函数用于获取播放地址，返回值可以是本地文件地址 / http(s)地址 / blob地址 / base64 dataurl，不成功可以用空参数调callback
 	//【注意：读取失败return可以用空串】
 	async getPlayUrl(file) {
-		const tempDir = path.join(os.tmpdir(), 'SimMusic_BiliSupport');
+		const tempDir = path.join(os.tmpdir(), 'sim-music.ext.bilibili', 'cache');
 		if (!fs.existsSync(tempDir)) {
 			fs.mkdirSync(tempDir, { recursive: true });
 		}
@@ -428,7 +421,7 @@ function generateMenuItems() {
 		}
 	});
 	menu.push({ type: "single", content: { type: "separator" } });
-	menu.push(DownloadController.getMenuItems());
+	// menu.push(DownloadController.getMenuItems());
 
 	return menu;
 }

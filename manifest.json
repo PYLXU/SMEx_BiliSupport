@@ -2,7 +2,7 @@
   "packageId": "bilibili",
   "extName": "[音源扩展]Bilibili",
   "uiName": "B站",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "entries": [
     "main.js"
   ]
