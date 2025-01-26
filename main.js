@@ -16,6 +16,7 @@ const os = require('os');
 // 当没有config.setItem时，调用config.getItem会返回defaultConfig中的值
 
 defaultConfig["ext.bilibili.musicList"] = [];
+defaultConfig["ext.bilibili.maxTemp"] = 50;
 
 /**************** 工具函数 ****************/
 // 这些函数是插件自己需要的函数，个人推荐const一个object然后都用它存放，防止和主程序内置函数名冲突
@@ -206,7 +207,7 @@ ExtensionConfig.bilibili.player = {
 		const id = file.replace("bilibili:", "");
 		const bvid = id.split("-")[0];
 		let cid = id.split("-")[1];
-		const cacheFilePath = path.join(tempDir, `${bvid}-${cid}.mp3`);
+		const cacheFilePath = path.join(tempDir, `${bvid}-${cid}.mp4`);
 
 		if (fs.existsSync(cacheFilePath)) {
 			return `file://${cacheFilePath}`;
@@ -301,7 +302,7 @@ ExtensionConfig.bilibili.player = {
 
 		fs.writeFileSync(cacheFilePath, audioBuffer);
 
-		const maxTemp = config.getItem("ext.bilibili.maxTemp", 10);
+		const maxTemp = config.getItem("ext.bilibili.maxTemp", 50);
 		const cachedFiles = fs.readdirSync(tempDir);
 		if (cachedFiles.length > maxTemp) {
 			const oldestFile = cachedFiles.sort((a, b) => fs.statSync(path.join(tempDir, a)).mtime - fs.statSync(path.join(tempDir, b)).mtime)[0];
