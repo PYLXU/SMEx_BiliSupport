@@ -20,7 +20,7 @@
 ## 扩展说明
 
 1. 本扩展中「搜索」与「字幕获取」请求因需要验证Cookie，中途需经过RisServer，但请放心，您的信息不会因此泄漏
-2. 若扩展存在Bug请及时提交
+2. 若扩展存在Bug请及时[提交](https://github.com/PYLXU/SMEx_BiliSupport/issues)，非常感谢
 
 ## 特别鸣谢
 
