@@ -35,10 +35,6 @@ const FileExtensionTools = {
 		const seconds = (time % 60).toFixed(2).padStart(5, "0");
 		return `${minutes}:${seconds}`;
 	},
-	openCategory: async (bvid) => {
-		const response = await fetch("https://api.bilibili.com/x/web-interface/view?bvid=" + category);
-		const metadata = await response.json();
-	},
 	fileMenuItem: [
 		{ type: ["single"], content: { label: "在资源管理器显示", icon: "ED8A", click() { shell.showItemInFolder(getCurrentSelected()[0]) } } }
 	]
@@ -46,53 +42,54 @@ const FileExtensionTools = {
 
 /**************** 左侧导航 ****************/
 // 如果你懒，这个字段可以不写，这样插件就没有左侧导航功能（你可以参考下面的写搜索功能）
+const elements = {};
 ExtensionConfig.bilibili.musicList = {
 	async _import(callback, id, isUpdate = false) {
 		let list = config.getItem("ext.bilibili.musicList");
 		if (!isUpdate) {
 			for (let entry of list) {
 				if (entry.id == id) {
-					return alert("此歌单（" + entry.name + "）已被添加，请尝试删除后重试。");
+					return alert("此歌单「" + entry.name + "」已被添加，请尝试删除后重试。");
 				}
 			}
 		}
 		try {
 			const response = await fetch("https://api.bilibili.com/x/web-interface/view?bvid=" + id);
 			const metadata = await response.json();
-			const name = metadata.data.title;
-			const bvid = metadata.data.bvid;
-			let resultArray = [];
+			prompt("请输入歌单名称，留空使用视频名称", async (name) => {
+				if (name == "") name = metadata.data.title;
+				const bvid = metadata.data.bvid;
+				let resultArray = [];
 
-			const pagelistResponse = await fetch("https://api.bilibili.com/x/player/pagelist?bvid=" + bvid);
-			const pagelist = await pagelistResponse.json();
-			if (pagelist.data.length > 1) {
-				if (confirm("此视频存在分集，是否将分集作为歌单添加？")) {
-					resultArray = pagelist.data.map(item => "bilibili:" + bvid + "-" + item.cid);
+				const pagelistResponse = await fetch("https://api.bilibili.com/x/player/pagelist?bvid=" + bvid);
+				const pagelist = await pagelistResponse.json();
+				const ugcSeason = metadata.data.ugc_season;
+				console.log(ugcSeason.sections[0].episodes.map(item => "bilibili:" + item.bvid + "-default"));
+				if (ugcSeason) {
+					resultArray = resultArray.concat(ugcSeason.sections[0].episodes.map(item => "bilibili:" + item.bvid + "-default"));
+
+					if (isUpdate) {
+						list = list.filter((it) => it.id != id);
+					}
+					const newEntry = { id, name, songs: resultArray };
+					list.push(newEntry);
+					config.setItem("ext.bilibili.musicList", list);
+					if (isUpdate) {
+						ExtensionConfig.bilibili.musicList.switchList(id);
+					}
+					alert("成功导入歌单 " + name + "，共导入 " + resultArray.length + " 首歌曲。", callback);
 				}
-			}
 
-			const ugcSeason = metadata.data.ugc_season;
-			if (ugcSeason) {
-				if (confirm("此视频存在合集，是否将合集作为歌单添加？")) {
-					resultArray = metadata.data.ugc_season.sections[0].episodes.map(item => "bilibili:" + item.bvid + "-default");
-				}
-			}
-
-			if (resultArray.length == 0) {
-				alert("你正在尝试创建空歌单，已取消操作。");
-				return;
-			}
-
-			if (isUpdate) {
-				list = list.filter((it) => it.id != id);
-			}
-			const newEntry = { id, name, songs: resultArray };
-			list.push(newEntry);
-			config.setItem("ext.bilibili.musicList", list);
-			if (isUpdate) {
-				ExtensionConfig.bilibili.musicList.switchList(id);
-			}
-			alert("成功导入歌单 " + name + "，共导入 " + resultArray.length + " 首歌曲。", callback);
+				// 因为confirm限制，做并行会导致某些问题，因此分集暂不支持
+				// if (pagelist.data.length > 1) {
+				// 	const addEpisodes = await new Promise((resolve) => {
+				// 		confirm("此视频存在分集，是否将分集作为歌单添加？", resolve);
+				// 	});
+				// 	if (addEpisodes) {
+				// 		resultArray = resultArray.concat(pagelist.data.map(item => "bilibili:" + bvid + "-" + item.cid));
+				// 	}
+				// }
+			});
 		} catch (err) {
 			alert("导入歌单失败，请稍后重试：" + err);
 		}
@@ -103,14 +100,13 @@ ExtensionConfig.bilibili.musicList = {
 			try {
 				if (/^[a-zA-Z0-9]+$/.test(input)) {
 					id = input;
-				} else if (input.includes("bvid=")) {
-					const param = new URL(input).searchParams.get("bvid");
-					if (!param || !/^[a-zA-Z0-9]+$/.test(param)) {
+				} else {
+					const url = new URL(input);
+					const pathParts = url.pathname.split('/');
+					id = pathParts.find(part => part.startsWith('BV'));
+					if (!id || !/^[a-zA-Z0-9]+$/.test(id)) {
 						throw 0;
 					}
-					id = param;
-				} else {
-					throw 0;
 				}
 			} catch {
 				return alert("无法解析视频 ID，请检查您输入的内容。");
@@ -152,6 +148,7 @@ ExtensionConfig.bilibili.musicList = {
 					}
 				]).popup([event.clientX, event.clientY]);
 			};
+			elements[entry.id] = element;
 			container.appendChild(element);
 		});
 	},
@@ -204,7 +201,7 @@ ExtensionConfig.bilibili.player = {
 		// 这里的cid需要从file中读取来处理分P的情况
 		// cid为空或者default的时候需要获取第一分P的真实cid
 		// 如果cid已经传入了就不再获取第一P了
-		if(!cid || cid == "default") {
+		if (!cid || cid == "default") {
 			try {
 				cid = await new Promise((resolve, reject) => {
 					https.get(`https://api.bilibili.com/x/player/pagelist?bvid=${bvid}`, (res) => {
@@ -300,7 +297,7 @@ ExtensionConfig.bilibili.player = {
 		const id = file.replace("bilibili:", "");
 		const bvid = id.split("-")[0];
 		let cid = id.split("-")[1];
-		if(!cid || cid == "default") {
+		if (!cid || cid == "default") {
 			try {
 				cid = await new Promise((resolve, reject) => {
 					https.get(`https://api.bilibili.com/x/player/pagelist?bvid=${bvid}`, (res) => {
@@ -341,7 +338,7 @@ ExtensionConfig.bilibili.search = async (keyword, _page) => {
 
 function generateMenuItems() {
 	let menu = [];
-	menu.push({ type: "single" , content: { type: "separator" } });
+	menu.push({ type: "single", content: { type: "separator" } });
 	menu.push({
 		type: "single",
 		content: {
@@ -351,7 +348,7 @@ function generateMenuItems() {
 				const files = getCurrentSelected();
 				const id = files[0].replace("bilibili:", "");
 				const bvid = id.split("-")[0];
-				webview(`https://www.bilibili.com/video/${bvid}`,{width: 1366, height: 768});
+				webview(`https://www.bilibili.com/video/${bvid}`, { width: 1366, height: 768 });
 			}
 		}
 	});
@@ -364,13 +361,13 @@ function generateMenuItems() {
 				const files = getCurrentSelected();
 				const id = files[0].replace("bilibili:", "");
 				const bvid = id.split("-")[0];
-				
+
 				let resultArray = [];
 				const response = await fetch("https://api.bilibili.com/x/web-interface/view?bvid=" + bvid);
 				const result = await response.json();
 				if (result.data.ugc_season == null) return alert("此视频不属于任何合集。");
 				resultArray = result.data.ugc_season.sections[0].episodes.map(item => "bilibili:" + item.bvid + "-default");
-			
+
 
 				renderMusicList(resultArray, {
 					uniqueId: "bilibili-category-" + bvid,
@@ -392,13 +389,13 @@ function generateMenuItems() {
 				const files = getCurrentSelected();
 				const id = files[0].replace("bilibili:", "");
 				const bvid = id.split("-")[0];
-				
+
 				let resultArray = [];
 				const response = await fetch("https://api.bilibili.com/x/player/pagelist?bvid=" + bvid);
 				const result = await response.json();
 				if (result.data.length == 0) return alert("此视频没有分集信息。");
 				resultArray = result.data.map(item => "bilibili:" + bvid + "-" + item.cid);
-			
+
 
 				renderMusicList(resultArray, {
 					uniqueId: "bilibili-period-" + bvid,
@@ -410,7 +407,7 @@ function generateMenuItems() {
 			}
 		}
 	});
-	menu.push({ type: "single" , content: { type: "separator" } });
+	menu.push({ type: "single", content: { type: "separator" } });
 	menu.push(DownloadController.getMenuItems());
 
 	return menu;
