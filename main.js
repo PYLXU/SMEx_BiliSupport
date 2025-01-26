@@ -1,4 +1,5 @@
 const https = require('https');
+const { type } = require('os');
 
 
 /*
@@ -19,15 +20,27 @@ const https = require('https');
 /**************** 工具函数 ****************/
 // 这些函数是插件自己需要的函数，个人推荐const一个object然后都用它存放，防止和主程序内置函数名冲突
 const FileExtensionTools = {
-	formatTime(ms) {
-		const totalSeconds = Math.floor(ms / 1000);
-		const minutes = Math.floor(totalSeconds / 60);
-		const seconds = totalSeconds % 60;
-		const milliseconds = ms % 1000;
-		const formattedMinutes = minutes.toString().padStart(2, '0');
-		const formattedSeconds = seconds.toString().padStart(2, '0');
-		const formattedMilliseconds = milliseconds.toString();
-		return `${formattedMinutes}:${formattedSeconds}.${formattedMilliseconds}`;
+	convertToLrc: (jsonData) => {
+		let lrcText = "";
+		jsonData.body.forEach((item) => {
+			const fromTime = item.from;
+			const toTime = item.to;
+			const content = item.content;
+			const fromTimeStr = `[${this.padTime(fromTime)}]`;
+			const toTimeStr = `[${this.padTime(toTime)}]`;
+			lrcText += `${fromTimeStr}${content}\n`;
+			lrcText += `${toTimeStr}${content}\n`;
+		});
+		return lrcText;
+	},
+	padTime: (time) => {
+		const minutes = Math.floor(time / 60).toString().padStart(2, "0");
+		const seconds = (time % 60).toFixed(2).padStart(5, "0");
+		return `${minutes}:${seconds}`;
+	},
+	openCategory: async (bvid) => {
+		const response = await fetch("https://api.bilibili.com/x/web-interface/view?bvid=" + category);
+		const metadata = await response.json();
 	},
 	fileMenuItem: [
 		{ type: ["single"], content: { label: "在资源管理器显示", icon: "ED8A", click() { shell.showItemInFolder(getCurrentSelected()[0]) } } }
@@ -129,27 +142,20 @@ ExtensionConfig.bilibili.musicList = {
 // 这个函数用于读取音乐元数据，不管你是本地还是在线，无所谓你咋获取，最后都调callback(data)就行。
 // 如果是在线的用fetch就更好做，直接修改我musicmetadata的promise就得
 //【注意：读取失败可以返回null，各字段值可以没有】
-
-const basicHeaders = {
-	"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-	"Accept-Encoding": "gzip",
-	"Origin": "https://www.bilibili.com",
-	"Host": "api.bilibili.com",
-	"Referer": "https://www.bilibili.com/"
-};
-
-
 ExtensionConfig.bilibili.readMetadata = async (file) => {
+	// 因为分P的问题，这里的file格式是“bilibili:<bvid>-<cid>”，所以需要分割一下
+	// 而分P的视频标题啥的是一样的，所以不需要专门获取，只需要一个bvid就行了
 	const id = file.replace("bilibili:", "");
-	const response = await fetch("https://api.bilibili.com/x/web-interface/view?bvid=" + id);
+	const bvid = id.split("-")[0];
+	const cid = id.split("-")[1];
+	const response = await fetch("https://api.bilibili.com/x/web-interface/view?bvid=" + bvid);
 	const metadata = await response.json();
 	return {
 		title: metadata.data.title,
 		artist: metadata.data.owner.name,
 		album: metadata.data.tname_v2 ? metadata.data.tname_v2 : "未知专辑",
 		time: metadata.data.duration,
-		cover: metadata.data.pic ? metadata.data.pic : "",
-		lyrics: "",
+		cover: metadata.data.pic ? metadata.data.pic : ""
 	};
 };
 
@@ -160,24 +166,30 @@ ExtensionConfig.bilibili.player = {
 	//【注意：读取失败return可以用空串】
 	async getPlayUrl(file) {
 		const id = file.replace("bilibili:", "");
-		let cid;
-		try {
-			cid = await new Promise((resolve, reject) => {
-				https.get(`https://api.bilibili.com/x/player/pagelist?bvid=${id}`, (res) => {
-					let data = '';
-					res.on('data', chunk => data += chunk);
-					res.on('end', () => resolve(JSON.parse(data).data[0].cid));
-				}).on('error', reject);
-			});
-		} catch (error) {
-			console.error("Error fetching CID:", error);
-			return "";
+		const bvid = id.split("-")[0];
+		let cid = id.split("-")[1];
+		// 这里的cid需要从file中读取来处理分P的情况
+		// cid为空或者default的时候需要获取第一分P的真实cid
+		// 如果cid已经传入了就不再获取第一P了
+		if(!cid || cid == "default") {
+			try {
+				cid = await new Promise((resolve, reject) => {
+					https.get(`https://api.bilibili.com/x/player/pagelist?bvid=${bvid}`, (res) => {
+						let data = '';
+						res.on('data', chunk => data += chunk);
+						res.on('end', () => resolve(JSON.parse(data).data[0].cid));
+					}).on('error', reject);
+				});
+			} catch (error) {
+				console.error("Error fetching CID:", error);
+				return "";
+			}
 		}
 
 		let downloadUrl;
 		try {
 			downloadUrl = await new Promise((resolve, reject) => {
-				https.get(`https://api.bilibili.com/x/player/playurl?bvid=${id}&cid=${cid}`, (res) => {
+				https.get(`https://api.bilibili.com/x/player/playurl?bvid=${bvid}&cid=${cid}`, (res) => {
 					let data = '';
 					res.on('data', chunk => data += chunk);
 					res.on('end', () => resolve(JSON.parse(data).data.durl[0].url));
@@ -232,9 +244,9 @@ ExtensionConfig.bilibili.player = {
 		let audioBuffer;
 		try {
 			const size = await getAudioSize(downloadUrl);
-			const chunkSize = Math.ceil(size / 4); // Divide into 4 parts for multi-threading
+			const chunkSize = Math.ceil(size / 10);
 			const promises = [];
-			for (let i = 0; i < 4; i++) {
+			for (let i = 0; i < 10; i++) {
 				const start = i * chunkSize;
 				const end = (i + 1) * chunkSize - 1;
 				promises.push(downloadAudio(downloadUrl, start, end));
@@ -252,7 +264,31 @@ ExtensionConfig.bilibili.player = {
 	// 这个函数用于（在本地索引没有歌词的情况下获取歌词），例如在线播放时把歌词全部写到索引不太现实，就会调用这个方法直接读取
 	//【注意：读取失败return可以用空串】
 	async getLyrics(file) {
-		return "";
+		const id = file.replace("bilibili:", "");
+		const bvid = id.split("-")[0];
+		let cid = id.split("-")[1];
+		if(!cid || cid == "default") {
+			try {
+				cid = await new Promise((resolve, reject) => {
+					https.get(`https://api.bilibili.com/x/player/pagelist?bvid=${bvid}`, (res) => {
+						let data = '';
+						res.on('data', chunk => data += chunk);
+						res.on('end', () => resolve(JSON.parse(data).data[0].cid));
+					}).on('error', reject);
+				});
+			} catch (error) {
+				console.error("Error fetching CID:", error);
+				return "";
+			}
+		}
+		try {
+			const response = await fetch(`https://api.3r60.top/v2/bili/t/?bvid=${bvid}&cid=${cid}`);
+			const data = await response.text();
+			return data;
+		} catch (error) {
+			console.error("Error fetching lyrics:", error);
+			return "";
+		}
 	}
 };
 
@@ -262,11 +298,55 @@ ExtensionConfig.bilibili.search = async (keyword, _page) => {
 	let resultArray = [];
 	const response = await fetch("https://api.3r60.top/v2/bili/s/?keydown=" + encodeURI(keyword));
 	const result = await response.json();
-	resultArray = result.data.result[11].data.map(item => "bilibili:" + item.bvid);
+	resultArray = result.data.result.map(item => "bilibili:" + item.bvid + "-default");
+	let menu = [];
+	menu.push({ type: "single" , content: { type: "separator" } });
+	menu.push({
+		type: "single",
+		content: {
+			label: "播放视频",
+			icon: "EABF",
+			click() {
+				const files = getCurrentSelected();
+				const id = files[0].replace("bilibili:", "");
+				const bvid = id.split("-")[0];
+				webview(`https://www.bilibili.com/video/${bvid}`,{width: 1366, height: 768});
+			}
+		}
+	});
+	menu.push({
+		type: "single",
+		content: {
+			label: "查看合集",
+			icon: "ED8A",
+			click() {
+				const files = getCurrentSelected();
+				const id = files[0].replace("bilibili:", "");
+				const bvid = id.split("-")[0];
+
+			}
+		}
+	});
+	// 此处的分集就是指的分P
+	menu.push({
+		type: "single",
+		content: {
+			label: "查看分集",
+			icon: "ED89",
+			click() {
+				const files = getCurrentSelected();
+				const id = files[0].replace("bilibili:", "");
+				const bvid = id.split("-")[0];
+
+			}
+		}
+	});
+	menu.push({ type: "single" , content: { type: "separator" } });
+	menu.push(DownloadController.getMenuItems());
 
 	return {
 		files: resultArray,
-		menu: null,
+		menu,
 		hasMore: false
 	};
 }
