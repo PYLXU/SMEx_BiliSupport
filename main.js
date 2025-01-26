@@ -1,7 +1,6 @@
 const https = require('https');
 const { type } = require('os');
 
-
 /*
  * BiliSupported 扩展 for SimMusic
  * 本扩展由 @PYLXU 编写
@@ -10,12 +9,10 @@ const { type } = require('os');
  * 若无特殊说明，基本所有的file变量格式都是“scheme: + <id>”，自己开发时候请不要忘了添加scheme:前缀
  */
 
-
 /**************** 基础配置 ****************/
 // 当没有config.setItem时，调用config.getItem会返回defaultConfig中的值
 
-// defaultConfig["folderLists"] = [];
-
+defaultConfig["ext.bilibili.musicList"] = [];
 
 /**************** 工具函数 ****************/
 // 这些函数是插件自己需要的函数，个人推荐const一个object然后都用它存放，防止和主程序内置函数名冲突
@@ -47,96 +44,133 @@ const FileExtensionTools = {
 	]
 }
 
-
-
 /**************** 左侧导航 ****************/
 // 如果你懒，这个字段可以不写，这样插件就没有左侧导航功能（你可以参考下面的写搜索功能）
 ExtensionConfig.bilibili.musicList = {
-	// 这个函数用于处理用户点击歌单“加号”的事件
-	// 如果没有（例如你的插件是自动同步一个用户的所有歌单），可以不写，这样加号图标就不会显示
-	add(callback) {
-		// 这里自己实现添加逻辑，简单输入可直接调内置的 prompt(placeholder:str, callback:function) 方法
-		ipcRenderer.invoke("pickFolder")
-			.then(dir => {
-				if (!dir || !dir[0]) return;
-				dir = dir[0].trim().replaceAll("/", "\\");
-				// 内置config读取可用getItem
-				const lists = config.getItem("folderLists");
-				// 由于数据格式由开发者自行定义，重复导入 & 其他错误需要开发者自行处理
-				if (dir.split("\\").length == 2 && !dir.split("\\")[1]) return alert("您不能导入磁盘根目录。");
-				if (lists.includes(dir)) return alert("此目录已被添加到目录列表中。");
-				lists.push(dir);
-				// 内置config写入可用setItem
-				config.setItem("folderLists", lists);
-				// 导入成功后需开发者自行调用callback以更新左侧显示内容（必须），switchList以打开刚才导入的歌单（可选）
-				callback();
-				ExtensionConfig.file.musicList.switchList(dir);
-			});
+	async _import(callback, id, isUpdate = false) {
+		let list = config.getItem("ext.bilibili.musicList");
+		if (!isUpdate) {
+			for (let entry of list) {
+				if (entry.id == id) {
+					return alert("此歌单（" + entry.name + "）已被添加，请尝试删除后重试。");
+				}
+			}
+		}
+		try {
+			const response = await fetch("https://api.bilibili.com/x/web-interface/view?bvid=" + id);
+			const metadata = await response.json();
+			const name = metadata.data.title;
+			const bvid = metadata.data.bvid;
+			let resultArray = [];
+
+			const pagelistResponse = await fetch("https://api.bilibili.com/x/player/pagelist?bvid=" + bvid);
+			const pagelist = await pagelistResponse.json();
+			if (pagelist.data.length > 1) {
+				if (confirm("此视频存在分集，是否将分集作为歌单添加？")) {
+					resultArray = pagelist.data.map(item => "bilibili:" + bvid + "-" + item.cid);
+				}
+			}
+
+			const ugcSeason = metadata.data.ugc_season;
+			if (ugcSeason) {
+				if (confirm("此视频存在合集，是否将合集作为歌单添加？")) {
+					resultArray = metadata.data.ugc_season.sections[0].episodes.map(item => "bilibili:" + item.bvid + "-default");
+				}
+			}
+
+			if (resultArray.length == 0) {
+				alert("你正在尝试创建空歌单，已取消操作。");
+				return;
+			}
+
+			if (isUpdate) {
+				list = list.filter((it) => it.id != id);
+			}
+			const newEntry = { id, name, songs: resultArray };
+			list.push(newEntry);
+			config.setItem("ext.bilibili.musicList", list);
+			if (isUpdate) {
+				ExtensionConfig.bilibili.musicList.switchList(id);
+			}
+			alert("成功导入歌单 " + name + "，共导入 " + resultArray.length + " 首歌曲。", callback);
+		} catch (err) {
+			alert("导入歌单失败，请稍后重试：" + err);
+		}
 	},
-	// 这个函数用于渲染左侧的歌单列表
+	add(callback) {
+		prompt("请输入Bilibili视频 分享 URL 或 ID 以导入歌单", async (input) => {
+			let id;
+			try {
+				if (/^[a-zA-Z0-9]+$/.test(input)) {
+					id = input;
+				} else if (input.includes("bvid=")) {
+					const param = new URL(input).searchParams.get("bvid");
+					if (!param || !/^[a-zA-Z0-9]+$/.test(param)) {
+						throw 0;
+					}
+					id = param;
+				} else {
+					throw 0;
+				}
+			} catch {
+				return alert("无法解析视频 ID，请检查您输入的内容。");
+			}
+			await ExtensionConfig.bilibili.musicList._import(callback, id);
+		});
+	},
 	renderList(container) {
-		const lists = config.getItem("folderLists");
-		lists.forEach(name => {
-			const splitted = name.split("\\");
-			const folderName = splitted[splitted.length - 1];
-			// 创建一个div即可，可以不需要有类名
+		const list = config.getItem("ext.bilibili.musicList");
+		if (!list) return;
+		if (list.length == 0) return;
+		list.forEach((entry) => {
 			const element = document.createElement("div");
-			element.textContent = folderName;
-			element.dataset.folderName = name;
-			// 处理点击，一般直接switchList即可
-			element.onclick = () => { this.switchList(name); };
-			// 创建右键菜单，具体使用方法参考 zhujin917/3sqrt7-context-menu/README.md
-			element.oncontextmenu = event => {
+			element.textContent = entry.name;
+			element.onclick = () => this.switchList(entry.id);
+			element.oncontextmenu = (event) => {
 				new ContextMenu([
-					{ label: "查看歌曲", icon: "ECB5", click() { element.click(); } },
-					{ label: "在资源管理器中显示", icon: "ED8A", click() { shell.openPath(name); } },
-					{ type: "separator" },
+					{ label: "查看歌曲", click: element.click },
 					{
-						label: "添加到歌单", icon: "EE0D", submenu: MusicList.getMenuItems(listName => {
-							MusicList.importToMusicList(listName, FileExtensionTools.scanMusic(name));
-							MusicList.switchList(listName, true);
-						})
-					},
-					{
-						label: "从列表中移除", icon: "ED74", click() {
-							confirm(`目录「${folderName}」将从 SimMusic 目录列表中移除，但不会从文件系统中删除。是否继续？`, () => {
-								const lists = config.getItem("folderLists");
-								lists.splice(lists.indexOf(name), 1);
-								config.setItem("folderLists", lists);
-								if (element.classList.contains("active")) switchRightPage("rightPlaceholder");
-								element.remove();
+						label: "重新导入歌单",
+						click() {
+							confirm(`确认重新导入Bilibili歌单 ${entry.name} 吗？`, () => {
+								ExtensionConfig.bilibili.musicList._import(null, entry.id, true);
 							});
 						}
 					},
+					{
+						label: "从列表中移除",
+						click() {
+							confirm(`确认移除Bilibili歌单 ${entry.name} 吗？`, () => {
+								const currentList = config.getItem("ext.bilibili.musicList");
+								config.setItem("ext.bilibili.musicList", currentList.filter((it) => it.id != entry.id));
+								if (element.classList.contains("active")) {
+									switchRightPage("rightPlaceholder");
+								}
+								element.remove();
+							});
+						}
+					}
 				]).popup([event.clientX, event.clientY]);
 			};
-			// 把div附加到左侧界面，container会由ExtensionRuntime自动传入，无需担心是否存在
 			container.appendChild(element);
 		});
 	},
-	// 这个函数用于切换歌单
-	switchList(name) {
-		const splitted = name.split("\\");
-		// 统一调用renderMusicList即可，第二个参数需要传入一个用于识别“当前歌单”的唯一的参数，推荐使用插件名+歌单id以防重复
-		// 如果你的scanMusic必须是异步的，可以先renderMusicList([], id)以切换界面，再renderMusicList(list, id)，id一样就可以
-		// rML第三个参数请固定false，第4个参数指定是否进行预先渲染，如果为true则在二次渲染之前不会显示歌单（适用于在线歌曲必须要获取metadata的情况）
-		renderMusicList(FileExtensionTools.scanMusic(name), {
-			uniqueId: "folder-" + name,
-			errorText: "当前目录为空",
-			menuItems: FileExtensionTools.fileMenuItem,
-			musicListInfo: {
-				name: splitted[splitted.length - 1],
-				dirName: name,
+	switchList(id) {
+		const entry = config.getItem("ext.bilibili.musicList").find((it) => it.id == id);
+		renderMusicList(entry.songs, {
+			uniqueId: "bilibili-list-" + id,
+			errorText: "该歌单为空",
+			menuItems: generateMenuItems(),
+			musicListInfo: { name: entry.name }
+		}, false);
+		document.querySelectorAll(".left .leftBar div").forEach((it) => {
+			if (it.classList.contains("active")) {
+				it.classList.remove("active");
 			}
 		});
-		// 这个用于把当前歌单标蓝，放在renderMusicList函数后运行，推荐借鉴我的写法在renderList函数里自己设一个dataset，然后遍历dataset
-		document.querySelectorAll(".left .leftBar div").forEach(ele => {
-			if (ele.dataset.folderName != name) ele.classList.remove("active");
-			else ele.classList.add("active");
-		});
-	},
+		elements[id].classList.add("active");
+	}
 };
-
 
 /**************** 获取数据 ****************/
 // 这个函数用于读取音乐元数据，不管你是本地还是在线，无所谓你咋获取，最后都调callback(data)就行。
@@ -158,7 +192,6 @@ ExtensionConfig.bilibili.readMetadata = async (file) => {
 		cover: metadata.data.pic ? metadata.data.pic : ""
 	};
 };
-
 
 /**************** 歌曲播放 ****************/
 ExtensionConfig.bilibili.player = {
@@ -292,13 +325,21 @@ ExtensionConfig.bilibili.player = {
 	}
 };
 
-
 /**************** 歌曲搜索 ****************/
 ExtensionConfig.bilibili.search = async (keyword, _page) => {
 	let resultArray = [];
 	const response = await fetch("https://api.3r60.top/v2/bili/s/?keydown=" + encodeURI(keyword));
 	const result = await response.json();
 	resultArray = result.data.result.map(item => "bilibili:" + item.bvid + "-default");
+
+	return {
+		files: resultArray,
+		menu: generateMenuItems(),
+		hasMore: false
+	};
+}
+
+function generateMenuItems() {
 	let menu = [];
 	menu.push({ type: "single" , content: { type: "separator" } });
 	menu.push({
@@ -319,10 +360,24 @@ ExtensionConfig.bilibili.search = async (keyword, _page) => {
 		content: {
 			label: "查看合集",
 			icon: "ED8A",
-			click() {
+			async click() {
 				const files = getCurrentSelected();
 				const id = files[0].replace("bilibili:", "");
 				const bvid = id.split("-")[0];
+				
+				let resultArray = [];
+				const response = await fetch("https://api.bilibili.com/x/web-interface/view?bvid=" + bvid);
+				const result = await response.json();
+				if (result.data.ugc_season == null) return alert("此视频不属于任何合集。");
+				resultArray = result.data.ugc_season.sections[0].episodes.map(item => "bilibili:" + item.bvid + "-default");
+			
+
+				renderMusicList(resultArray, {
+					uniqueId: "bilibili-category-" + bvid,
+					errorText: "获取合集信息失败",
+					menuItems: menu,
+					musicListInfo: { name: result.data.title }
+				}, false);
 
 			}
 		}
@@ -333,10 +388,24 @@ ExtensionConfig.bilibili.search = async (keyword, _page) => {
 		content: {
 			label: "查看分集",
 			icon: "ED89",
-			click() {
+			async click() {
 				const files = getCurrentSelected();
 				const id = files[0].replace("bilibili:", "");
 				const bvid = id.split("-")[0];
+				
+				let resultArray = [];
+				const response = await fetch("https://api.bilibili.com/x/player/pagelist?bvid=" + bvid);
+				const result = await response.json();
+				if (result.data.length == 0) return alert("此视频没有分集信息。");
+				resultArray = result.data.map(item => "bilibili:" + bvid + "-" + item.cid);
+			
+
+				renderMusicList(resultArray, {
+					uniqueId: "bilibili-period-" + bvid,
+					errorText: "获取分集信息失败",
+					menuItems: menu,
+					musicListInfo: { name: "分级详情" }
+				}, false);
 
 			}
 		}
@@ -344,9 +413,5 @@ ExtensionConfig.bilibili.search = async (keyword, _page) => {
 	menu.push({ type: "single" , content: { type: "separator" } });
 	menu.push(DownloadController.getMenuItems());
 
-	return {
-		files: resultArray,
-		menu,
-		hasMore: false
-	};
+	return menu;
 }
