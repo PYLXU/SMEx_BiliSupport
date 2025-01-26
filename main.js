@@ -1,5 +1,8 @@
 const https = require('https');
 const { type } = require('os');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 
 /*
  * BiliSupported 扩展 for SimMusic
@@ -195,12 +198,22 @@ ExtensionConfig.bilibili.player = {
 	// 这个函数用于获取播放地址，返回值可以是本地文件地址 / http(s)地址 / blob地址 / base64 dataurl，不成功可以用空参数调callback
 	//【注意：读取失败return可以用空串】
 	async getPlayUrl(file) {
+		const tempDir = path.join(os.tmpdir(), 'SimMusic_BiliSupport');
+		if (!fs.existsSync(tempDir)) {
+			fs.mkdirSync(tempDir, { recursive: true });
+		}
+
 		const id = file.replace("bilibili:", "");
 		const bvid = id.split("-")[0];
 		let cid = id.split("-")[1];
-		// 这里的cid需要从file中读取来处理分P的情况
-		// cid为空或者default的时候需要获取第一分P的真实cid
-		// 如果cid已经传入了就不再获取第一P了
+		const cacheFilePath = path.join(tempDir, `${bvid}-${cid}.mp3`);
+
+		// Check if the file is already cached
+		if (fs.existsSync(cacheFilePath)) {
+			return `file://${cacheFilePath}`;
+		}
+
+		// Fetch CID if not provided
 		if (!cid || cid == "default") {
 			try {
 				cid = await new Promise((resolve, reject) => {
@@ -288,8 +301,18 @@ ExtensionConfig.bilibili.player = {
 			return "";
 		}
 
-		const base64Audio = audioBuffer.toString('base64');
-		return `data:audio/mp3;base64,${base64Audio}`;
+		// Save the audio buffer to cache
+		fs.writeFileSync(cacheFilePath, audioBuffer);
+
+		// Check and manage cache size
+		const maxTemp = config.getItem("ext.bilibili.maxTemp", 10);
+		const cachedFiles = fs.readdirSync(tempDir);
+		if (cachedFiles.length > maxTemp) {
+			const oldestFile = cachedFiles.sort((a, b) => fs.statSync(path.join(tempDir, a)).mtime - fs.statSync(path.join(tempDir, b)).mtime)[0];
+			fs.unlinkSync(path.join(tempDir, oldestFile));
+		}
+
+		return `file://${cacheFilePath}`;
 	},
 	// 这个函数用于（在本地索引没有歌词的情况下获取歌词），例如在线播放时把歌词全部写到索引不太现实，就会调用这个方法直接读取
 	//【注意：读取失败return可以用空串】
